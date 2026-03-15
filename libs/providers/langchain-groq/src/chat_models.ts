@@ -25,6 +25,7 @@ import {
   UsageMetadata,
   FunctionMessageChunk,
   ToolMessageChunk,
+  isDataContentBlock,
 } from "@langchain/core/messages";
 import {
   ChatGeneration,
@@ -352,6 +353,62 @@ export function messageToGroqRole(message: BaseMessage): GroqRoleEnum {
   }
 }
 
+/**
+ * Converts an array of message content blocks to the format expected by the Groq API.
+ * Handles standard image content blocks (both legacy `source_type` format and new
+ * multimodal format) and converts them to the OpenAI-compatible `image_url` format
+ * that the Groq API expects.
+ *
+ * @param content - Array of content blocks from a message
+ * @returns Array of content blocks in Groq API format
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function convertContentToGroqFormat(content: Array<any>): Array<any> {
+  return content.map((block) => {
+    if (typeof block !== "object" || block === null || !("type" in block)) {
+      return block;
+    }
+
+    if (block.type === "image") {
+      // Handle legacy data content blocks with source_type (deprecated format)
+      if (isDataContentBlock(block)) {
+        if (block.source_type === "url") {
+          return {
+            type: "image_url",
+            image_url: { url: block.url },
+          };
+        }
+        if (block.source_type === "base64") {
+          return {
+            type: "image_url",
+            image_url: {
+              url: `data:${block.mime_type ?? "image/jpeg"};base64,${block.data}`,
+            },
+          };
+        }
+      }
+
+      // Handle new multimodal format (ContentBlock.Multimodal.Image)
+      if ("url" in block && typeof block.url === "string") {
+        return {
+          type: "image_url",
+          image_url: { url: block.url },
+        };
+      }
+      if ("data" in block && typeof block.data === "string") {
+        return {
+          type: "image_url",
+          image_url: {
+            url: `data:${block.mimeType ?? "image/jpeg"};base64,${block.data}`,
+          },
+        };
+      }
+    }
+
+    return block;
+  });
+}
+
 function convertMessagesToGroqParams(
   messages: BaseMessage[]
 ): Array<ChatCompletionsAPI.ChatCompletionMessage> {
@@ -359,7 +416,9 @@ function convertMessagesToGroqParams(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const completionParam: Record<string, any> = {
       role: messageToGroqRole(message),
-      content: message.content,
+      content: Array.isArray(message.content)
+        ? convertContentToGroqFormat(message.content)
+        : message.content,
       name: message.name,
       function_call: message.additional_kwargs.function_call,
       tool_calls: message.additional_kwargs.tool_calls,

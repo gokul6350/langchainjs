@@ -3,6 +3,7 @@ import {
   AIMessage,
   AIMessageChunk,
   ChatMessage,
+  HumanMessage,
 } from "@langchain/core/messages";
 import { OutputParserException } from "@langchain/core/output_parsers";
 import { ChatGroq, messageToGroqRole } from "../chat_models.js";
@@ -250,5 +251,272 @@ describe("withStructuredOutput - StandardSchema", () => {
     expect(result).toHaveProperty("parsed");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((result as any).parsed).toEqual({ name: "cobalt" });
+  });
+});
+
+describe("vision - image content block conversion", () => {
+  test("vision model has imageInputs set to true in profile", () => {
+    const model = new ChatGroq({
+      apiKey: "foo",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    });
+    expect(model.profile.imageInputs).toBe(true);
+  });
+
+  test("non-vision model has imageInputs set to false in profile", () => {
+    const model = new ChatGroq({
+      apiKey: "foo",
+      model: "llama-3.3-70b-versatile",
+    });
+    expect(model.profile.imageInputs).toBe(false);
+  });
+
+  test("standard image url block (source_type) is converted to image_url format", async () => {
+    const model = new ChatGroq({
+      apiKey: "fake-key",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const capturedParams: Record<string, any>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(model as any, "completionWithRetry").mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (params: any) => {
+        capturedParams.push(params);
+        return {
+          id: "test-id",
+          object: "chat.completion",
+          created: Date.now(),
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "It is an image." },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+          x_groq: { id: "req-test" },
+        };
+      }
+    );
+
+    const msg = new HumanMessage({
+      content: [
+        { type: "text", text: "What is in the image?" },
+        {
+          type: "image",
+          source_type: "url",
+          url: "https://example.com/image.png",
+        },
+      ],
+    });
+
+    await model.invoke([msg]);
+
+    expect(capturedParams.length).toBeGreaterThan(0);
+    const messages = capturedParams[0].messages;
+    const userMsg = messages.find(
+      (m: { role: string }) => m.role === "user"
+    );
+    expect(userMsg).toBeDefined();
+    const contentBlocks = userMsg.content;
+    const imageBlock = contentBlocks.find(
+      (b: { type: string }) => b.type === "image_url"
+    );
+    expect(imageBlock).toBeDefined();
+    expect(imageBlock.image_url.url).toBe("https://example.com/image.png");
+  });
+
+  test("standard image base64 block (source_type) is converted to image_url format", async () => {
+    const model = new ChatGroq({
+      apiKey: "fake-key",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const capturedParams: Record<string, any>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(model as any, "completionWithRetry").mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (params: any) => {
+        capturedParams.push(params);
+        return {
+          id: "test-id",
+          object: "chat.completion",
+          created: Date.now(),
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "It is red." },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 3,
+            total_tokens: 13,
+          },
+          x_groq: { id: "req-test" },
+        };
+      }
+    );
+
+    const base64Data = "abc123def456";
+    const msg = new HumanMessage({
+      content: [
+        {
+          type: "image",
+          source_type: "base64",
+          data: base64Data,
+          mime_type: "image/png",
+        },
+      ],
+    });
+
+    await model.invoke([msg]);
+
+    expect(capturedParams.length).toBeGreaterThan(0);
+    const messages = capturedParams[0].messages;
+    const userMsg = messages.find(
+      (m: { role: string }) => m.role === "user"
+    );
+    expect(userMsg).toBeDefined();
+    const contentBlocks = userMsg.content;
+    const imageBlock = contentBlocks.find(
+      (b: { type: string }) => b.type === "image_url"
+    );
+    expect(imageBlock).toBeDefined();
+    expect(imageBlock.image_url.url).toBe(
+      `data:image/png;base64,${base64Data}`
+    );
+  });
+
+  test("new multimodal image url block is converted to image_url format", async () => {
+    const model = new ChatGroq({
+      apiKey: "fake-key",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const capturedParams: Record<string, any>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(model as any, "completionWithRetry").mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (params: any) => {
+        capturedParams.push(params);
+        return {
+          id: "test-id",
+          object: "chat.completion",
+          created: Date.now(),
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "It is an image." },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+          },
+          x_groq: { id: "req-test" },
+        };
+      }
+    );
+
+    const msg = new HumanMessage({
+      content: [
+        {
+          type: "image",
+          url: "https://example.com/photo.jpg",
+          mimeType: "image/jpeg",
+        },
+      ],
+    });
+
+    await model.invoke([msg]);
+
+    expect(capturedParams.length).toBeGreaterThan(0);
+    const messages = capturedParams[0].messages;
+    const userMsg = messages.find(
+      (m: { role: string }) => m.role === "user"
+    );
+    expect(userMsg).toBeDefined();
+    const contentBlocks = userMsg.content;
+    const imageBlock = contentBlocks.find(
+      (b: { type: string }) => b.type === "image_url"
+    );
+    expect(imageBlock).toBeDefined();
+    expect(imageBlock.image_url.url).toBe("https://example.com/photo.jpg");
+  });
+
+  test("existing image_url blocks are passed through unchanged", async () => {
+    const model = new ChatGroq({
+      apiKey: "fake-key",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const capturedParams: Record<string, any>[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(model as any, "completionWithRetry").mockImplementation(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async (params: any) => {
+        capturedParams.push(params);
+        return {
+          id: "test-id",
+          object: "chat.completion",
+          created: Date.now(),
+          model: "meta-llama/llama-4-scout-17b-16e-instruct",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "A photo." },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 10,
+            completion_tokens: 2,
+            total_tokens: 12,
+          },
+          x_groq: { id: "req-test" },
+        };
+      }
+    );
+
+    const msg = new HumanMessage({
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: "https://example.com/already-correct.png" },
+        },
+      ],
+    });
+
+    await model.invoke([msg]);
+
+    expect(capturedParams.length).toBeGreaterThan(0);
+    const messages = capturedParams[0].messages;
+    const userMsg = messages.find(
+      (m: { role: string }) => m.role === "user"
+    );
+    const contentBlocks = userMsg.content;
+    const imageBlock = contentBlocks.find(
+      (b: { type: string }) => b.type === "image_url"
+    );
+    expect(imageBlock).toBeDefined();
+    expect(imageBlock.image_url.url).toBe(
+      "https://example.com/already-correct.png"
+    );
   });
 });
