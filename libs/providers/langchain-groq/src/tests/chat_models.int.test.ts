@@ -311,6 +311,30 @@ test("invoke with image input", async () => {
   );
 });
 
+test("invoke with image input using standard LangChain source_type format", async () => {
+  const chat = new ChatGroq({
+    maxRetries: 0,
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+  });
+  const message = new HumanMessage({
+    content: [
+      {
+        type: "text",
+        text: "What's in this image? Reply in one word.",
+      },
+      {
+        type: "image",
+        source_type: "url",
+        url: "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
+      },
+    ],
+  });
+  const res = await chat.invoke([message]);
+
+  expect(res.content.length).toBeGreaterThan(0);
+  expect(typeof res.content).toBe("string");
+});
+
 describe("Groq Reasoning with contentBlocks", () => {
   test("invoke with parsed reasoning returns reasoning in contentBlocks", async () => {
     const chat = new ChatGroq({
